@@ -6,11 +6,24 @@ import google_translate_api as api
 
 def getValues(input):
 	fileContent = input.read();
+	input.close()
 
 	values = []
-	for match in re.finditer('<key>(?P<key>.*)</key>[\s]*<value>(<!\[CDATA\[)?(?P<content>[^\]<]*)(\]\]>)?</value>', fileContent, re.MULTILINE):
-		values.append((match.group("key"), match.group('content')))
-	input.close()
+	header = fileContent.split("\n", 3);
+	for i in xrange(len(header)-1):
+		# Excel format
+		if re.search("Workbook", header[i]):
+			#for match in re.finditer('<Row[^>]*><Data[^>]*>(?P<key>.+)</Data>.*<Data[^>]*>(?P<value>.+)</Data>[\s]*</Cell>[\s]*</Row>', fileContent, re.MULTILINE|re.DOTALL):
+			for match in re.finditer('<Row[^>]*>[\s]*<Cell[^>]*><Data[^>]*>(?P<key>[^<]+)</Data>[\s]*</Cell>[\s]*<Cell[^>]*><Data[^>]*>(?P<content>[^<]+)</Data>[\s]*</Cell>[\s]*</Row>', fileContent, re.MULTILINE|re.DOTALL):
+				values.append((match.group("key"), match.group('content')))
+		# GRAR format
+		elif re.search("Localisation", header[i]):
+			for match in re.finditer('<key>(?P<key>.*)</key>[\s]*<value>(<!\[CDATA\[)?(?P<content>[^\]<]*)(\]\]>)?</value>', fileContent, re.MULTILINE):
+				values.append((match.group("key"), match.group('content')))
+		# XLIFF format
+		elif re.search("xliff", header[i]):
+			pass
+
 	return values
 
 def loremipfy(input, output):
@@ -18,7 +31,7 @@ def loremipfy(input, output):
 
 	fileContent = input.read();
 	input.close()
-	outputString = StringIO()
+	outputString = StringIO.StringIO()
 	prevEnd = 0
 
 	for match in re.finditer('<value>(<!\[CDATA\[)?(?P<content>[^\]<]*)(\]\]>)?</value>', fileContent, re.MULTILINE):
@@ -56,18 +69,33 @@ def excelsior(input, output):
 				else:
 					outputString.write(value)
 				outputString.write(match.group(5))
-			outputString.write(excelTemplate[match.end():].decode("utf8"))
+			outputString.write(excelTemplate[match.end():]) #.decode("utf8")
 			bufferValue = outputString.getvalue()+"\n"
 			bufferValue = bufferValue.replace('ss:ExpandedRowCount="1"', 'ss:ExpandedRowCount="'+str(len(localeList))+'"')
-			output.write(bufferValue.encode('utf8'))
+			output.write(bufferValue)#.encode('utf8')
 			outputString.close()
 			output.close()
+
+def xmlify(input, output):
+	outputString = StringIO.StringIO();
+	outputString.write("<?xml version='1.0'?>\n<Localisation>");
+	for key, value in getValues(input):
+	 	outputString.write("<Element>\n\t<key>"); 
+	 	outputString.write(key); 
+	 	outputString.write("</key>\n\t<value><![CDATA["); 
+	 	outputString.write(value); 
+	 	outputString.write("]]></value>\n</Element>\n"); 
+	outputString.write("</Localisation");
+	output.write(outputString.getvalue());
+	outputString.close();
+	output.close();
 
 # Start	
 parser = argparse.ArgumentParser(description='Transform a localisation file')
 parser.add_argument('input', metavar='input_file', type=argparse.FileType('r'), help='input file to transform')
 parser.add_argument('-l', '--lorem', dest='lorem_output', action='store', type=argparse.FileType('w'), help='Replace all the content by a Lorem Ipsum extract')
-parser.add_argument('-e', '--excel', dest='excel_output', action='store', type=argparse.FileType('w'), help='Convert the XML location file into an MS Excel file')
+parser.add_argument('-e', '--excel', dest='excel_output', action='store', type=argparse.FileType('w'), help='Convert the location file into an MS Excel file')
+parser.add_argument('-x', '--xml', dest='xml_output', action='store', type=argparse.FileType('w'), help='Convert the location file into an XML file')
 parser.add_argument('-t', '--template', dest='template', action='store', type=argparse.FileType('r'), help='Excel Template for Excel export')
 parser.add_argument('--lang', dest='language', action='store', help='Language location will be translated to')
 args = parser.parse_args()
@@ -78,6 +106,8 @@ if args.lorem_output:
 	loremipfy(args.input, args.lorem_output)
 elif args.excel_output:
 	excelsior(args.input, args.excel_output)
+elif args.xml_output:
+	xmlify(args.input, args.xml_output)
 
 # Futur TTS ?
 #tts = api.TTSService()
